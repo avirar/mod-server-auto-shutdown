@@ -65,6 +65,7 @@ void ServerAutoShutdown::Init()
 
     std::string configTimes = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.Times", "04:00:00");
     auto const& timeStrings = Acore::Tokenize(configTimes, ';', false);
+    LOG_INFO("ServerAutoShutdown", "Loaded ServerAutoShutdown.Times: {}", configTimes);
 
     std::vector<std::tuple<uint8, uint8, uint8>> resetTimes;
 
