@@ -63,9 +63,9 @@ void ServerAutoShutdown::Init()
     if (!_isEnableModule)
         return;
 
-    std::string configTimes = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.Times", "04:00:00");
+    std::string configTimes = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.Time", "04:00:00");
     auto const& timeStrings = Acore::Tokenize(configTimes, ';', false);
-    LOG_INFO("ServerAutoShutdown", "Loaded ServerAutoShutdown.Times: {}", configTimes);
+    LOG_INFO("ServerAutoShutdown", "Loaded ServerAutoShutdown.Time: {}", configTimes);
 
     std::vector<std::tuple<uint8, uint8, uint8>> resetTimes;
 
@@ -75,7 +75,7 @@ void ServerAutoShutdown::Init()
 
         if (tokens.size() != 3)
         {
-            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time format in config option 'ServerAutoShutdown.Times' - '{}'", timeString);
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time format in config option 'ServerAutoShutdown.Time' - '{}'", timeString);
             continue;
         }
 
@@ -93,7 +93,7 @@ void ServerAutoShutdown::Init()
 
         if (!CheckTime({ 0, 1, 2 }))
         {
-            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time in config option 'ServerAutoShutdown.Times' - '{}'", timeString);
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time in config option 'ServerAutoShutdown.Time' - '{}'", timeString);
             continue;
         }
 
@@ -103,7 +103,7 @@ void ServerAutoShutdown::Init()
 
         if (hour > 23 || minute >= 60 || second >= 60)
         {
-            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time value in config option 'ServerAutoShutdown.Times' - '{}'", timeString);
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time value in config option 'ServerAutoShutdown.Time' - '{}'", timeString);
             continue;
         }
 
