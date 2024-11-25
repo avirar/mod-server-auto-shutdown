@@ -29,7 +29,7 @@ ServerAutoShutdown.EveryDays = 1
 #        Default:     04:00:00;12:00:00;20:00:00
 #
 
-ServerAutoShutdown.Time = "04:00:00;12:00:00;20:00:00"
+ServerAutoShutdown.Time = "23:59:59;12:00:00"
 
 #
 #    ServerAutoShutdown.PreAnnounce.Seconds
@@ -42,7 +42,7 @@ ServerAutoShutdown.PreAnnounce.Seconds = 3600
 #
 #    ServerAutoShutdown.PreAnnounce.Message
 #        Description: An announcement to be broadcasted in-game
-#        Default:     "[SERVER]: Automated (quick) server restart in %s"
+#        Default:     "[SERVER]: Automated (quick) server restart in {}"
 #
 
 ServerAutoShutdown.PreAnnounce.Message = "[SERVER]: Automated (quick) server restart in {}"
