@@ -215,6 +215,6 @@ void ServerAutoShutdown::StartPersistentGameEvents()
         sGameEventMgr->StartEvent(eventId);
 
         GameEventData const& eventData = events[eventId];
-        LOG_INFO("module", "> ServerAutoShutdown: Starting event {} ({}).", eventData.description, eventId);
+        LOG_INFO("module", "> ServerAutoShutdown: Starting event {} ({}).", eventData.Description, eventId);
     }
 }
