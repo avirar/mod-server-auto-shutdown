@@ -28,6 +28,7 @@
 #include "Tokenize.h"
 #include "Util.h"
 #include "World.h"
+#include "WorldSessionMgr.h"
 
 namespace
 {
