@@ -89,136 +89,145 @@ void ServerAutoShutdown::Init()
     if (!_isEnableModule)
         return;
 
-    std::string configTime = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.Time", "04:00:00");
-    auto const& tokens = Acore::Tokenize(configTime, ':', false);
+    std::string configTimes = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.Time", "04:00:00");
+    auto const& timeStrings = Acore::Tokenize(configTimes, ';', false);
+    LOG_INFO("module", "> ServerAutoShutdown: Loaded ServerAutoShutdown.Time: {}", configTimes);
 
-    if (tokens.size() != 3)
+    std::vector<std::tuple<uint8, uint8, uint8>> resetTimes;
+
+    for (const auto& timeString : timeStrings)
     {
-        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time in config option 'ServerAutoShutdown.Time' - '{}'", configTime);
-        _isEnableModule = false;
-        return;
+        auto const& tokens = Acore::Tokenize(timeString, ':', false);
+
+        if (tokens.size() != 3)
+        {
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time format in config option 'ServerAutoShutdown.Time' - '{}'", timeString);
+            continue;
+        }
+
+        // Check convert to int
+        auto CheckTime = [tokens](std::initializer_list<uint8> index)
+        {
+            for (auto const& itr : index)
+                if (!Acore::StringTo<uint8>(tokens.at(itr)))
+                    return false;
+
+            return true;
+        };
+
+        if (!CheckTime({ 0, 1, 2 }))
+        {
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time in config option 'ServerAutoShutdown.Time' - '{}'", timeString);
+            continue;
+        }
+
+        uint8 hour = *Acore::StringTo<uint8>(tokens.at(0));
+        uint8 minute = *Acore::StringTo<uint8>(tokens.at(1));
+        uint8 second = *Acore::StringTo<uint8>(tokens.at(2));
+
+        if (hour > 23 || minute >= 60 || second >= 60)
+        {
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time value in config option 'ServerAutoShutdown.Time' - '{}'", timeString);
+            continue;
+        }
+
+        resetTimes.emplace_back(hour, minute, second);
     }
 
-    // Check convert to int
-    auto CheckTime = [tokens](std::initializer_list<uint8> index)
+    if (resetTimes.empty())
     {
-        for (auto const& itr : index)
-            if (!Acore::StringTo<uint8>(tokens.at(itr)))
-                return false;
-
-        return true;
-    };
-
-    if (!CheckTime({ 0, 1, 2 }))
-    {
-        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect time in config option 'ServerAutoShutdown.Time' - '{}'", configTime);
+        LOG_ERROR("module", "> ServerAutoShutdown: No valid shutdown times provided in config.");
         _isEnableModule = false;
         return;
     }
 
     int weekday = sConfigMgr->GetOption<int>("ServerAutoShutdown.Weekday", -1);
-    uint32 restartDays =  sConfigMgr->GetOption<uint32>("ServerAutoShutdown.EveryDays", 1);
-    uint8 restartHour = *Acore::StringTo<uint8>(tokens.at(0));
-    uint8 restartMinute = *Acore::StringTo<uint8>(tokens.at(1));
-    uint8 restartSecond = *Acore::StringTo<uint8>(tokens.at(2));
+    uint32 restartDays = sConfigMgr->GetOption<uint32>("ServerAutoShutdown.EveryDays", 1);
 
-    auto nowTime = time(nullptr);
-    uint64 nextResetTime = 0;
-
-    if (weekday >= 0 && weekday <= 6)
+    // Validate weekday if set
+    if (weekday < -1 || weekday > 6)
     {
-        nextResetTime = GetNextWeekdayTime(nowTime, weekday, restartHour, restartMinute, restartSecond);
-    }
-    else
-    {
-        if (restartDays < 1 || restartDays > 365)
-        {
-            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect day in config option 'ServerAutoShutdown.EveryDays' - '{}'", restartDays);
-            _isEnableModule = false;
-            return;
-        }
-        nextResetTime = GetNextResetTime(nowTime, restartDays, restartHour, restartMinute, restartSecond);
+        LOG_WARN("module", "> ServerAutoShutdown: Invalid weekday value '{}'. Must be -1 (disabled) or 0-6 (Sunday-Saturday). Using -1.", weekday);
+        weekday = -1;
     }
 
+    // Validate EveryDays
     if (restartDays < 1 || restartDays > 365)
     {
-        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect day in config option 'ServerAutoShutdown.EveryDays' - '{}'", restartDays);
+        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect day in config option 'ServerAutoShutdown.EveryDays' - '{}'. Must be 1-365.", restartDays);
         _isEnableModule = false;
-    }
-    else if (restartHour > 23)
-    {
-        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect hour in config option 'ServerAutoShutdown.Time' - '{}'", configTime);
-        _isEnableModule = false;
-    }
-    else if (restartMinute >= 60)
-    {
-        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect minute in config option 'ServerAutoShutdown.Time' - '{}'", configTime);
-        _isEnableModule = false;
-    }
-    else if (restartSecond >= 60)
-    {
-        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect second in config option 'ServerAutoShutdown.Time' - '{}'", configTime);
-        _isEnableModule = false;
+        return;
     }
 
-    uint32 diffToShutdown = nextResetTime - static_cast<uint32>(nowTime);
+    auto nowTime = time(nullptr);
 
-    if (diffToShutdown < 10)
-    {
-        LOG_WARN("module", "> ServerAutoShutdown: Next time to shutdown < 10 seconds, Set next period");
-        if (weekday >= 0 && weekday <= 6)
-            nextResetTime += WEEK;
-        else
-            nextResetTime += DAY * restartDays;
-        diffToShutdown = nextResetTime - static_cast<uint32>(nowTime);
-    }
-
-    LOG_INFO("module", " ");
-    LOG_INFO("module","> ServerAutoShutdown: System loading");
-
-    // Cancel all task for support reload config
+    // Cancel all tasks for support reload config
     scheduler.CancelAll();
     sWorld->ShutdownCancel();
 
-    LOG_INFO("module", "> ServerAutoShutdown: Next time to shutdown - {}", Acore::Time::TimeToHumanReadable(Seconds(nextResetTime)));
-    LOG_INFO("module", "> ServerAutoShutdown: Remaining time to shutdown - {}", Acore::Time::ToTimeString<Seconds>(diffToShutdown));
-    LOG_INFO("module", " ");
-
-    uint32 preAnnounceSeconds = sConfigMgr->GetOption<uint32>("ServerAutoShutdown.PreAnnounce.Seconds", HOUR);
-    if (preAnnounceSeconds > DAY)
-    {
-        LOG_ERROR("module", "> ServerAutoShutdown: Ahah, how could this happen? Time to preannouce has been set to more than 1 day? ({}). Change to 1 hour (3600)", preAnnounceSeconds);
-        preAnnounceSeconds = HOUR;
-    }
-
-    uint32 timeToPreAnnounce = static_cast<uint32>(nextResetTime) - preAnnounceSeconds;
-    uint32 diffToPreAnnounce = timeToPreAnnounce - static_cast<uint32>(nowTime);
-
-    // Ingnore pre announce time and set is left
-    if (diffToShutdown < preAnnounceSeconds)
-    {
-        timeToPreAnnounce = static_cast<uint32>(nowTime) + 1;
-        diffToPreAnnounce = 1;
-        preAnnounceSeconds = diffToShutdown;
-    }
-
-    LOG_INFO("module", "> ServerAutoShutdown: Next time to pre annouce - {}", Acore::Time::TimeToHumanReadable(Seconds(timeToPreAnnounce)));
-    LOG_INFO("module", "> ServerAutoShutdown: Remaining time to pre annouce - {}", Acore::Time::ToTimeString<Seconds>(diffToPreAnnounce));
-    LOG_INFO("module", " ");
-
     StartPersistentGameEvents();
 
-    // Add task for pre shutdown announce
-    scheduler.Schedule(Seconds(diffToPreAnnounce), [preAnnounceSeconds](TaskContext /*context*/)
+    for (const auto& [hour, minute, second] : resetTimes)
     {
-        std::string preAnnounceMessageFormat = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.PreAnnounce.Message", "[SERVER]: Automated (quick) server restart in {}");
-        std::string message = Acore::StringFormat(preAnnounceMessageFormat, Acore::Time::ToTimeString<Seconds>(preAnnounceSeconds, TimeOutput::Seconds, TimeFormat::FullText));
+        uint64 nextResetTime = 0;
 
-        LOG_INFO("module", "> {}", message);
+        // Use weekday-based scheduling if weekday is valid (0-6), otherwise use day-based scheduling
+        if (weekday >= 0 && weekday <= 6)
+        {
+            nextResetTime = GetNextWeekdayTime(nowTime, weekday, hour, minute, second);
+        }
+        else
+        {
+            nextResetTime = GetNextResetTime(nowTime, restartDays, hour, minute, second);
+        }
 
-        sWorldSessionMgr->SendServerMessage(SERVER_MSG_STRING, message);
-        sWorld->ShutdownServ(preAnnounceSeconds, SHUTDOWN_MASK_RESTART, SHUTDOWN_EXIT_CODE);
-    });
+        uint32 diffToShutdown = nextResetTime - static_cast<uint32>(nowTime);
+
+        if (diffToShutdown < 10)
+        {
+            LOG_WARN("module", "> ServerAutoShutdown: Next time to shutdown < 10 seconds, Skipping this time");
+            continue;
+        }
+
+        LOG_INFO("module", " ");
+        LOG_INFO("module", "> ServerAutoShutdown: Next time to shutdown - {}", Acore::Time::TimeToHumanReadable(Seconds(nextResetTime)));
+        LOG_INFO("module", "> ServerAutoShutdown: Remaining time to shutdown - {}", Acore::Time::ToTimeString<Seconds>(diffToShutdown));
+        LOG_INFO("module", " ");
+
+        uint32 preAnnounceSeconds = sConfigMgr->GetOption<uint32>("ServerAutoShutdown.PreAnnounce.Seconds", 3600);
+        if (preAnnounceSeconds > 86400)
+        {
+            LOG_ERROR("module", "> ServerAutoShutdown: Time to preannounce exceeds 1 day? ({}). Changing to 1 hour (3600)", preAnnounceSeconds);
+            preAnnounceSeconds = 3600;
+        }
+
+        uint32 timeToPreAnnounce = static_cast<uint32>(nextResetTime) - preAnnounceSeconds;
+        uint32 diffToPreAnnounce = timeToPreAnnounce - static_cast<uint32>(nowTime);
+
+        // Ignore pre-announce time and set it to 1 second before shutdown if less than preAnnounceSeconds
+        if (diffToShutdown < preAnnounceSeconds)
+        {
+            timeToPreAnnounce = static_cast<uint32>(nowTime) + 1;
+            diffToPreAnnounce = 1;
+            preAnnounceSeconds = diffToShutdown;
+        }
+
+        LOG_INFO("module", "> ServerAutoShutdown: Next time to pre-announce - {}", Acore::Time::TimeToHumanReadable(Seconds(timeToPreAnnounce)));
+        LOG_INFO("module", "> ServerAutoShutdown: Remaining time to pre-announce - {}", Acore::Time::ToTimeString<Seconds>(diffToPreAnnounce));
+        LOG_INFO("module", " ");
+
+        // Add task for pre-shutdown announce
+        scheduler.Schedule(Seconds(diffToPreAnnounce), [preAnnounceSeconds](TaskContext /*context*/)
+        {
+            std::string preAnnounceMessageFormat = sConfigMgr->GetOption<std::string>("ServerAutoShutdown.PreAnnounce.Message", "[SERVER]: Automated (quick) server restart in {}");
+            std::string message = Acore::StringFormat(preAnnounceMessageFormat, Acore::Time::ToTimeString<Seconds>(preAnnounceSeconds, TimeOutput::Seconds, TimeFormat::FullText));
+
+            LOG_INFO("module", "> {}", message);
+
+            sWorldSessionMgr->SendServerMessage(SERVER_MSG_STRING, message);
+            sWorld->ShutdownServ(preAnnounceSeconds, SHUTDOWN_MASK_RESTART, SHUTDOWN_EXIT_CODE);
+        });
+    }
 }
 
 void ServerAutoShutdown::OnUpdate(uint32 diff)
