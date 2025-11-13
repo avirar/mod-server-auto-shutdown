@@ -49,6 +49,30 @@ namespace
 
         return midnightLocal;
     }
+
+    // Returns the next time_t for the given weekday (0=Sunday, 1=Monday, ..., 6=Saturday) at the given hour/min/sec
+    time_t GetNextWeekdayTime(time_t now, int weekday, uint8 restartHour, uint8 restartMinute, uint8 restartSecond)
+    {
+        tm timeLocal = Acore::Time::TimeBreakdown(now);
+        int currentWeekday = timeLocal.tm_wday;
+        int daysUntil = (weekday - currentWeekday + 7) % 7;
+        if (daysUntil == 0)
+        {
+            // If today, check if the time has already passed
+            if (timeLocal.tm_hour > restartHour ||
+                (timeLocal.tm_hour == restartHour && timeLocal.tm_min > restartMinute) ||
+                (timeLocal.tm_hour == restartHour && timeLocal.tm_min == restartMinute && timeLocal.tm_sec >= restartSecond))
+            {
+                daysUntil = 7;
+            }
+        }
+        timeLocal.tm_mday += daysUntil;
+        timeLocal.tm_hour = restartHour;
+        timeLocal.tm_min = restartMinute;
+        timeLocal.tm_sec = restartSecond;
+        time_t result = mktime(&timeLocal);
+        return result;
+    }
 }
 
 /*static*/ ServerAutoShutdown* ServerAutoShutdown::instance()
@@ -119,6 +143,23 @@ void ServerAutoShutdown::Init()
     }
 
     auto nowTime = time(nullptr);
+    int weekday = sConfigMgr->GetOption<int>("ServerAutoShutdown.Weekday", -1);
+    uint32 everyDays = sConfigMgr->GetOption<uint32>("ServerAutoShutdown.EveryDays", 1);
+
+    // Validate weekday if set
+    if (weekday < -1 || weekday > 6)
+    {
+        LOG_WARN("module", "> ServerAutoShutdown: Invalid weekday value '{}'. Must be -1 (disabled) or 0-6 (Sunday-Saturday). Using -1.", weekday);
+        weekday = -1;
+    }
+
+    // Validate EveryDays
+    if (everyDays < 1 || everyDays > 365)
+    {
+        LOG_ERROR("module", "> ServerAutoShutdown: Incorrect day in config option 'ServerAutoShutdown.EveryDays' - '{}'. Must be 1-365.", everyDays);
+        _isEnableModule = false;
+        return;
+    }
 
     // Cancel all tasks for support reload config
     scheduler.CancelAll();
@@ -126,7 +167,18 @@ void ServerAutoShutdown::Init()
 
     for (const auto& [hour, minute, second] : resetTimes)
     {
-        uint64 nextResetTime = GetNextResetTime(nowTime, 1, hour, minute, second); // default to daily reset
+        uint64 nextResetTime = 0;
+
+        // Use weekday-based scheduling if weekday is valid (0-6), otherwise use day-based scheduling
+        if (weekday >= 0 && weekday <= 6)
+        {
+            nextResetTime = GetNextWeekdayTime(nowTime, weekday, hour, minute, second);
+        }
+        else
+        {
+            nextResetTime = GetNextResetTime(nowTime, everyDays, hour, minute, second);
+        }
+
         uint32 diffToShutdown = nextResetTime - static_cast<uint32>(nowTime);
 
         if (diffToShutdown < 10)
