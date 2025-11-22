@@ -225,7 +225,7 @@ void ServerAutoShutdown::Init()
             LOG_INFO("module", "> {}", message);
 
             sWorldSessionMgr->SendServerMessage(SERVER_MSG_STRING, message);
-            sWorld->ShutdownServ(preAnnounceSeconds, SHUTDOWN_MASK_RESTART, SHUTDOWN_EXIT_CODE);
+            sWorld->ShutdownServ(preAnnounceSeconds, SHUTDOWN_MASK_RESTART, RESTART_EXIT_CODE);
         });
     }
 }
